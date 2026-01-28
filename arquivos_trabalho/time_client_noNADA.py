@@ -63,14 +63,11 @@ data_len = len(data)
 base = snd_nxt           # primeiro byte não confirmado
 next_seq = snd_nxt
 cwnd = MSS               # bytes
-rwnd = 50 * MSS          # começar com buffer anunciado alto
+rwnd = 1         # começar com buffer anunciado baixo,recebe depois o valor correto
 unacked = {}             # seq -> payload
 send_times = {}          # seq -> last send time
 timeouts = 0
-fastsrecoverys =0
-ssthresh = 15 * MSS
-dup_ack_count = 0
-in_fast_recovery = False
+
 
 PERSIST_INTERVAL = 0.5
 last_persist_probe = 0
@@ -134,28 +131,7 @@ while base < end_seq:
             rwnd = rwnd_recv
 
 
-            if(ack_num==base):
-                dup_ack_count+=1
-
-                if(dup_ack_count==3 and not in_fast_recovery):
-                    in_fast_recovery=True
-                    ssthresh = max(cwnd // 2, MSS)
-                    # fast recovery cwnd
-                    cwnd = ssthresh + 3 * MSS
-
-                    print(f"[CLIENT] Fast recovery, retransmitindo {base}")   
-                    fastsrecoverys+=1
-
-                    if base in unacked:
-                        send_seg(base, unacked[base])
-                    else:
-                        # retransmitir o menor não confirmado
-                        seqs = sorted(unacked.keys())
-                        if seqs:
-                            send_seg(seqs[0], unacked[seqs[0]])
-
-                elif(in_fast_recovery):
-                    cwnd+=MSS
+           
 
             if ack_num > base:
                 acked_seq = base
@@ -177,7 +153,7 @@ while base < end_seq:
                 bytes_acked += acked_now
 
 
-                dup_ack_count = 0
+              
                 # remover unacked confirmados
                 to_remove = [s for s in unacked if s < ack_num]
                 for s in to_remove:
@@ -185,18 +161,11 @@ while base < end_seq:
                     send_times.pop(s, None)
                 base = ack_num
                 # fases do protoclo
-                if in_fast_recovery:
-                    in_fast_recovery = False
-                    cwnd = ssthresh
+              
+               
                     # entra diretamente em Congestion Avoidance
-
-                elif cwnd < ssthresh: 
-                    # Slow Start
-                    cwnd += MSS
-
-                else:
-                    # Congestion Avoidance
-                    cwnd += MSS * (MSS / cwnd)
+                cwnd = rwnd
+            
 
             
     except socket.timeout:
@@ -205,14 +174,17 @@ while base < end_seq:
             # timeout: reduzir cwnd e retransmitir a partir de base
             print(f"[CLIENT] TIMEOUT, retransmitindo a partir de {base}")
             timeouts+=1
-            ssthresh = max(cwnd // 2, MSS)
-            cwnd = MSS
-
+            
+            cwnd = MSS  #  volta para 1 MSS, não rwnd
             RTO = min(RTO_MAX, RTO * 2)
-            # retransmitir todos não confirmados (desde a base)
-            seqs = sorted(unacked.keys())
-            for s in seqs:
-                send_seg(s, unacked[s], retransmission=True)
+            
+            # retransmite apenas o primeiro pacote perdido
+            # O Go-Back-N vai reenviar os outros naturalmente no próximo loop
+            if base in unacked:
+                send_seg(base, unacked[base], retransmission=True)
+            
+            #resetar offset para reenviar a partir da base
+            offset = base - snd_nxt + (next_seq - base)
     
 
 end = time.time()
@@ -238,7 +210,7 @@ while True:
 final_ack = make_packet(seq=base, ack=server_fin_seq + 1, flags=FLAG_ACK)
 sock.sendto(final_ack, SERVER)
 print("[CLIENT] Enviado ACK final. Time-wait (simulado).")
-print('Quantidade de Timeouts: ',timeouts,'Quantidade de fast recovery: ',fastsrecoverys)
+print('Quantidade de Timeouts: ',timeouts)
 
 
 file_name=f"throughput_loss_rate_{LOSS_RATE*100}%.csv"

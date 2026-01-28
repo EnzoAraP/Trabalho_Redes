@@ -2,21 +2,37 @@
 import socket
 import random
 import time
-from protocol import *
+from time_protocol import *
 
 SERVER = ("127.0.0.1", 20001)
 BUFFER_SIZE = 4096
-MSS = 500
+MSS = 1000
 TIMEOUT = 0.5
 
+srtt = None
+rttvar = None
+RTO = 0.5        # valor inicial
+RTO_MIN = 0.2
+RTO_MAX = 60.0
+
+ALPHA = 1/8
+BETA = 1/4
+
+LOSS_RATE=0.008
+
+
+
 bytes_acked = 0
+
 last_sample_time = time.time()
 samples = []  # lista de (tempo, vazao)
+
+
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(0.2)
 
-# PASSO 1:SYN (ISN cliente)
+# PASSO 1: SYN (ISN cliente)
 client_isn = random.randint(1000, 5000)
 pkt = make_packet(seq=client_isn, ack=0, flags=FLAG_SYN)
 sock.sendto(pkt, SERVER)
@@ -38,21 +54,23 @@ sock.sendto(ack_pkt, SERVER)
 print("[CLIENT] Enviado ACK final. Handshake OK")
 
 # Preparar dados 
-total_packets = 100
+total_packets = 100000
+
+
+
 data = b"A" * (MSS * total_packets)
 data_len = len(data)
 base = snd_nxt           # primeiro byte não confirmado
 next_seq = snd_nxt
-#cwnd = MSS               # bytes
-rwnd = 50 * MSS          # começar com buffer anunciado alto
+cwnd = MSS               # bytes
+rwnd = 1         # começar com buffer anunciado baixo,recebe depois o valor correto
 unacked = {}             # seq -> payload
 send_times = {}          # seq -> last send time
+timeouts = 0
+fastsrecoverys =0
 
-'''
-ssthresh = 15 * MSS
 dup_ack_count = 0
 in_fast_recovery = False
-'''
 
 PERSIST_INTERVAL = 0.5
 last_persist_probe = 0
@@ -60,10 +78,17 @@ last_persist_probe = 0
 offset = 0
 start = time.time()
 
-def send_seg(seq, payload):
+SAMPLE_INTERVAL =  total_packets/500000
+next_sample_time = start 
+
+
+def send_seg(seq, payload, retransmission = False):
     pkt = make_packet(seq=seq, ack=0, flags=FLAG_DATA, rwnd=0, payload=payload)
     sock.sendto(pkt, SERVER)
-    send_times[seq] = time.time()
+    if not retransmission:
+        send_times[seq] = time.time()
+    else:
+        send_times[seq] = None  # invalida RTT sample
     unacked[seq] = payload
     # print(f"sent seq={seq} len={len(payload)} cwnd={cwnd}") # opcional
 
@@ -72,17 +97,24 @@ print("[CLIENT] Iniciando envio de dados...")
 
 end_seq = snd_nxt + data_len
 while base < end_seq:
-    effective_win = rwind
+    effective_win = min(cwnd, rwnd)
+
+    now = time.time()
+    if now >= next_sample_time:
+        vazao = (bytes_acked * 8) / SAMPLE_INTERVAL / 1e6
+        samples.append((next_sample_time - start, vazao))
+        bytes_acked = 0
+        next_sample_time += SAMPLE_INTERVAL
 
     # para evitar deadlocks:
     if effective_win == 0:
-        # envie um probe pequeno a cada X segundos
+        # envie um 'probe' pequeno a cada X segundos
         if time.time() - last_persist_probe > PERSIST_INTERVAL:
             probe_payload = b'P'  # 1 byte probe
             send_seg(next_seq, probe_payload)
             next_seq += 1
             last_persist_probe = time.time()
-        
+ 
         continue
 
 
@@ -102,55 +134,80 @@ while base < end_seq:
             rwnd = rwnd_recv
 
 
-            
+            if(ack_num==base):
+                dup_ack_count+=1
+
+                if(dup_ack_count==3 and not in_fast_recovery):
+                    in_fast_recovery=True
+                    
+                    # fast recovery cwnd
+                    cwnd =rwnd
+
+                    print(f"[CLIENT] Fast recovery, retransmitindo {base}")    
+                    fastsrecoverys+=1
+                    if base in unacked:
+                        send_seg(base, unacked[base])
+                    else:
+                        # retransmitir o menor não confirmado
+                        seqs = sorted(unacked.keys())
+                        if seqs:
+                            send_seg(seqs[0], unacked[seqs[0]])
+
+                elif(in_fast_recovery):
+                    cwnd =rwnd
+
             if ack_num > base:
                 acked_seq = base
+                # estimar o RTT
                 if acked_seq in send_times and send_times[acked_seq] is not None:
                     sampleRTT = time.time() - send_times[acked_seq]
 
-                    if srtt is None:
-                        srtt = sampleRTT
-                        rttvar = sampleRTT / 2
-                    else:
+                    if srtt is None: #Inicial
+                        srtt = sampleRTT # Suavizado
+                        rttvar = sampleRTT / 2 # Desvio
+                    else: 
                         rttvar = (1 - BETA) * rttvar + BETA * abs(srtt - sampleRTT)
                         srtt = (1 - ALPHA) * srtt + ALPHA * sampleRTT
 
-                    RTO = srtt + 4 * rttvar
+                    RTO = srtt + 4 * rttvar # Conta da duração do Time_out
                     RTO = max(RTO_MIN, min(RTO, RTO_MAX))
-
 
                 acked_now = ack_num - base
                 bytes_acked += acked_now
 
-                now = time.time()
-                delta_t = now - last_sample_time
 
-                if delta_t >= 0.2:  # amostra a cada 200ms
-                    vazao = (bytes_acked * 8) / delta_t / 1e6  # Mbps
-                    samples.append((now - start, vazao))
-                    bytes_acked = 0
-                    last_sample_time = now
-
+                dup_ack_count = 0
                 # remover unacked confirmados
                 to_remove = [s for s in unacked if s < ack_num]
                 for s in to_remove:
                     unacked.pop(s, None)
                     send_times.pop(s, None)
                 base = ack_num
-                
+                # fases do protoclo
+                if in_fast_recovery:
+                    in_fast_recovery = False
+               
+                    # entra diretamente em Congestion Avoidance
+                cwnd = rwnd
+            
+
+            
     except socket.timeout:
         # checar timeouts do primeiro não confirmado (base)
         if base in send_times and send_times[base] is not None and time.time() - send_times[base] > RTO:
             # timeout: reduzir cwnd e retransmitir a partir de base
             print(f"[CLIENT] TIMEOUT, retransmitindo a partir de {base}")
+            timeouts+=1
 
+           
+            cwnd = rwnd
 
-            # retransmitir todos não confirmados (desde a base)
             RTO = min(RTO_MAX, RTO * 2)
             # retransmitir todos não confirmados (desde a base)
             seqs = sorted(unacked.keys())
             for s in seqs:
                 send_seg(s, unacked[s], retransmission=True)
+    
 
 end = time.time()
 print(f"[CLIENT] Envio concluído em {end - start:.2f}s")
@@ -175,9 +232,10 @@ while True:
 final_ack = make_packet(seq=base, ack=server_fin_seq + 1, flags=FLAG_ACK)
 sock.sendto(final_ack, SERVER)
 print("[CLIENT] Enviado ACK final. Time-wait (simulado).")
+print('Quantidade de Timeouts: ',timeouts,'Quantidade de fast recovery: ',fastsrecoverys)
 
 
-file_name=f"throughput_loss_rate_{LOSS_RATE*100}%_noCC.csv"
+file_name=f"throughput_loss_rate_{LOSS_RATE*100}%.csv"
 with open(file_name, "w") as f:
     f.write("time,throughput_mbps\n")
     for t, v in samples:
