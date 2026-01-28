@@ -9,6 +9,7 @@ FLAG_SYN  = 0x01
 FLAG_ACK  = 0x02
 FLAG_FIN  = 0x04
 FLAG_DATA = 0x08
+FLAG_KEY  = 0x10 
 
 def make_packet(seq, ack, flags, rwnd=0, payload=b""):
     header = struct.pack(HEADER_FORMAT, seq, ack, flags, rwnd)

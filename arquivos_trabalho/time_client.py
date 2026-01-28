@@ -3,9 +3,10 @@ import socket
 import random
 import time
 from time_protocol import *
+from encryption_handler import EncryptionHandler
 
 SERVER = ("127.0.0.1", 20001)
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 16384
 MSS = 1000
 TIMEOUT = 0.5
 
@@ -53,6 +54,34 @@ ack_pkt = make_packet(seq=snd_nxt, ack=snd_nxt_server, flags=FLAG_ACK)
 sock.sendto(ack_pkt, SERVER)
 print("[CLIENT] Enviado ACK final. Handshake OK")
 
+# Estabelecer chave de sessão
+print("[CLIENT] Gerando chave de sessão...")
+
+crypto_handler = EncryptionHandler()
+session_key = crypto_handler.get_key()
+
+print(f"[CLIENT] Chave gerada: {crypto_handler.get_key_string()[:30]}...")
+
+key_pkt = make_packet(
+    seq=snd_nxt,
+    ack=snd_nxt_server,
+    flags=FLAG_KEY,
+    payload=session_key
+)
+sock.sendto(key_pkt, SERVER)
+snd_nxt += len(session_key)
+
+print("[CLIENT] Chave enviada ao servidor")
+
+try:
+    data, _ = sock.recvfrom(BUFFER_SIZE)
+    _, _, flags, _, _ = parse_packet(data)
+    if flags & FLAG_ACK:
+        print("[CLIENT] Servidor confirmou recebimento da chave")
+except socket.timeout:
+    print("[CLIENT] AVISO: timeout esperando confirmação de chave")
+
+
 # Preparar dados 
 total_packets = 100000
 
@@ -62,7 +91,7 @@ data = b"A" * (MSS * total_packets)
 data_len = len(data)
 base = snd_nxt           # primeiro byte não confirmado
 next_seq = snd_nxt
-cwnd = MSS               # bytes
+cwnd = MSS             # bytes
 rwnd = 50 * MSS          # começar com buffer anunciado alto
 unacked = {}             # seq -> payload
 send_times = {}          # seq -> last send time
@@ -82,7 +111,10 @@ next_sample_time = start
 
 
 def send_seg(seq, payload, retransmission = False):
-    pkt = make_packet(seq=seq, ack=0, flags=FLAG_DATA, rwnd=0, payload=payload)
+
+    encrypted_payload = crypto_handler.encrypt(payload)
+
+    pkt = make_packet(seq=seq, ack=0, flags=FLAG_DATA, rwnd=0, payload=encrypted_payload)
     sock.sendto(pkt, SERVER)
     if not retransmission:
         send_times[seq] = time.time()
@@ -91,7 +123,7 @@ def send_seg(seq, payload, retransmission = False):
     unacked[seq] = payload
     # print(f"sent seq={seq} len={len(payload)} cwnd={cwnd}") # opcional
 
-print("[CLIENT] Iniciando envio de dados...")
+print("[CLIENT] Iniciando envio de dados Criptografados...")
 
 
 end_seq = snd_nxt + data_len
@@ -155,7 +187,7 @@ while base < end_seq:
                 elif(in_fast_recovery):
                     cwnd+=MSS
 
-            if ack_num > base:
+            elif ack_num > base:
                 acked_seq = base
                 # estimar o RTT
                 if acked_seq in send_times and send_times[acked_seq] is not None:
@@ -238,8 +270,10 @@ sock.sendto(final_ack, SERVER)
 print("[CLIENT] Enviado ACK final. Time-wait (simulado).")
 
 
-file_name=f"throughput_loss_rate_{LOSS_RATE*100}%.csv"
+file_name=f"throughput_encrypted_loss_rate_{LOSS_RATE*100}%.csv"
 with open(file_name, "w") as f:
     f.write("time,throughput_mbps\n")
     for t, v in samples:
         f.write(f"{t},{v}\n")
+
+print(f"[CLIENT] Resultados salvos em {file_name}")

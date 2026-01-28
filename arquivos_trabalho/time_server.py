@@ -2,18 +2,19 @@
 import socket
 import random
 from time_protocol import *
-
+from encryption_handler import EncryptionHandler
 
 # CONFIGURAÇÕES
 
 LOCAL_ADDR = ("0.0.0.0", 20001)
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 16384
 
-MSS = 500
+MSS = 1000
 LOSS_RATE = 0.008
 
 # buffer máximo do receptor (em bytes)
-max_buffer_bytes = 50 * MSS
+max_buffer_bytes = 100 * MSS
+
 
 
 # SOCKET
@@ -65,6 +66,8 @@ print("[SERVER] Handshake concluído")
 expected_seq = rcv_nxt              # próximo byte esperado
 buffer = {}                         # segmentos fora de ordem: seq -> payload
 buffered_bytes = 0                 # bytes ocupando buffer fora de ordem
+session_key = None  # ✅ Guardar chave aqui
+crypto_handler = None  # ✅ Descriptografador
 
 print("[SERVER] Pronto para receber dados...")
 
@@ -81,6 +84,21 @@ while True:
 
     seq, ack, flags, rwnd_recv, payload = parse_packet(data)
 
+    if flags & FLAG_KEY:
+        print("[SERVER] Recebeu chave de sessão")
+        session_key = payload
+        
+        crypto_handler = EncryptionHandler(key=session_key)
+
+        # Confirmar recebimento
+        ack_pkt = make_packet(
+            seq=snd_nxt,
+            ack=expected_seq,
+            flags=FLAG_ACK,
+            rwnd=0
+        )
+        sock.sendto(ack_pkt, addr)
+        continue  # Pular processamento normal
 
     # FINALIZAÇÃO (FIN)
 
@@ -111,7 +129,19 @@ while True:
     if payload_len == 0:
         continue
 
-
+    # DESCRIPTOGRAFAR se houver chave
+    if crypto_handler is not None:
+        try:
+            payload = crypto_handler.decrypt(payload)
+            payload_len = len(payload)
+        except Exception as e:
+            print(f"[SERVER] Erro ao descriptografar: {e}")
+            continue
+    else:
+        payload_len = len(payload)
+        
+    if payload_len == 0:
+        continue
     # TRIMMING DE SOBREPOSIÇÃO 
     #( Para evitar armazenar dados repitodos ou partes já recebidas)
 
@@ -152,7 +182,7 @@ while True:
 
     # CÁLCULO DA JANELA DO RECEPTOR
 
-    rwnd = max(0, max_buffer_bytes - buffered_bytes)
+    rwnd = max(0, (max_buffer_bytes - buffered_bytes) // 1024)
 
 
     # ACK CUMULATIVO

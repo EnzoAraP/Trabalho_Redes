@@ -23,9 +23,11 @@ class EncryptionHandler:
         data: bytes
         return: bytes criptografados
         """
-        if not isinstance(data, str):
+        if isinstance(data, str):
             data = data.encode()
-        return self.cipher.encrypt(data)
+    
+        encrypted = self.cipher.encrypt(data)
+        return encrypted
     
     def decrypt(self, encrypted_data):
         """
@@ -33,7 +35,11 @@ class EncryptionHandler:
         encrypted_data: bytes criptografados
         return: bytes descriptografados
         """
-        return self.cipher.decrypt(encrypted_data)
+        if isinstance(encrypted_data, str):
+            encrypted_data = encrypted_data.encode()
+    
+        decrypted = self.cipher.decrypt(encrypted_data)
+        return decrypted
     
     def get_key(self):
         """Retorna chave em formato base64 para transmissão"""
