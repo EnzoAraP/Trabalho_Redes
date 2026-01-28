@@ -9,8 +9,8 @@ from time_protocol import *
 LOCAL_ADDR = ("0.0.0.0", 20001)
 BUFFER_SIZE = 4096
 
-MSS = 500
-LOSS_RATE = 0.008
+MSS = 1000
+
 
 # buffer máximo do receptor (em bytes)
 max_buffer_bytes = 50 * MSS
@@ -22,8 +22,6 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(LOCAL_ADDR)
 
 print("[SERVER] Aguardando handshake...")
-
-
 
 
 # HANDSHAKE (3-way)
@@ -78,6 +76,8 @@ while True:
     if random.random() < LOSS_RATE:
         print("[SERVER] Pacote descartado artificialmente")
         continue
+    
+    print("")
 
     seq, ack, flags, rwnd_recv, payload = parse_packet(data)
 
@@ -112,8 +112,7 @@ while True:
         continue
 
 
-    # TRIMMING DE SOBREPOSIÇÃO 
-    #( Para evitar armazenar dados repitodos ou partes já recebidas)
+    # TRIMMING DE SOBREPOSIÇÃO
 
     if seq < expected_seq:
         end_seq = seq + payload_len
@@ -128,7 +127,7 @@ while True:
             seq = expected_seq
 
 
-    # ENTREGA 
+    # ENTREGA / BUFFERIZAÇÃO
 
     if seq == expected_seq:
         # entrega direta
@@ -167,10 +166,35 @@ while True:
 
 print("[SERVER] Finalizando. Aguardando ACK final do cliente...")
 
-# ACK final do FIN do servidor
-data, _ = sock.recvfrom(BUFFER_SIZE)
-_, ack_num, flags, _, _ = parse_packet(data)
-if flags & FLAG_ACK and ack_num == snd_nxt:
-    print("[SERVER] Encerramento confirmado. Closing.")
-else:
-    print("[SERVER] Encerramento: ACK final inválido (ou perdido).")
+# esperar ACK final com timeout e retries para evitar bloqueio indefinido
+sock.settimeout(2.0)   # espera por até 2s por tentativa
+final_ack_received = False
+retries = 3
+
+for attempt in range(retries):
+    try:
+        data, _ = sock.recvfrom(BUFFER_SIZE)
+        _, ack_num, flags, _, _ = parse_packet(data)
+        if flags & FLAG_ACK and ack_num == snd_nxt:
+            print("[SERVER] Encerramento confirmado. Closing.")
+            final_ack_received = True
+            break
+        else:
+            print("[SERVER] Encerramento: ACK final inválido (ou pacote diferente).")
+    except socket.timeout:
+        print(f"[SERVER] Timeout aguardando ACK final (tentativa {attempt+1}/{retries}).")
+        # após timeout, o servidor pode optar por retransmitir o FIN ou apenas continuar esperando.
+        # para simplicidade: reenvia o FIN para dar chance ao cliente (pode ajudar se o ACK do cliente foi perdido)
+        fin_pkt = make_packet(
+            seq=snd_nxt,
+            ack=0,
+            flags=FLAG_FIN
+        )
+        sock.sendto(fin_pkt, addr)
+        print("[SERVER] Reenviei FIN para tentar completar o encerramento.")
+
+if not final_ack_received:
+    print("[SERVER] Não recebi ACK final após retries. Encerrando mesmo assim.")
+
+# opcional: restaurar blocking mode sem timeout (se o servidor seguir vivo)
+sock.settimeout(None)

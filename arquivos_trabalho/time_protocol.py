@@ -10,6 +10,7 @@ FLAG_ACK  = 0x02
 FLAG_FIN  = 0x04
 FLAG_DATA = 0x08
 
+
 def make_packet(seq, ack, flags, rwnd=0, payload=b""):
     header = struct.pack(HEADER_FORMAT, seq, ack, flags, rwnd)
     return header + payload
@@ -19,3 +20,6 @@ def parse_packet(data):
     payload = data[HEADER_SIZE:]
     seq, ack, flags, rwnd = struct.unpack(HEADER_FORMAT, header)
     return seq, ack, flags, rwnd, payload
+
+
+LOSS_RATE = 0.008
