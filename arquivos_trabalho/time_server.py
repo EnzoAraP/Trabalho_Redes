@@ -1,7 +1,7 @@
 # server.py
 import socket
 import random
-from protocol import *
+from time_protocol import *
 
 
 # CONFIGURAÇÕES
