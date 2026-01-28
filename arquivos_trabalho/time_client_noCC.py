@@ -2,7 +2,7 @@
 import socket
 import random
 import time
-from protocol import *
+from time_protocol import *
 
 SERVER = ("127.0.0.1", 20001)
 BUFFER_SIZE = 4096
