@@ -66,10 +66,10 @@ def parse_packet(data, key=None):
     payload = data[HEADER_SIZE:]
     seq, ack, flags, rwnd = struct.unpack(HEADER_FORMAT, header)
     if key is not None and (flags & FLAG_DATA) and payload:
-        # tentamos decriptar; se falhar, lança exceção
+        # tentamos decriptografar; se falhar, lança exceção
         payload = decrypt_payload_aesgcm(key, header, payload)
     return seq, ack, flags, rwnd, payload
 
 
 
-LOSS_RATE = 0.000
+LOSS_RATE = 0.008

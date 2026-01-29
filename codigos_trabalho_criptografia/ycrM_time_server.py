@@ -5,9 +5,9 @@ from ycrM_time_protocol import *
 import time
 
 session_key = None
-# =======================
+
 # CONFIGURAÇÕES
-# =======================
+
 LOCAL_ADDR = ("0.0.0.0", 20001)
 BUFFER_SIZE = 4096
 
@@ -17,17 +17,17 @@ MSS = 1000
 # buffer máximo do receptor (em bytes)
 max_buffer_bytes = 50 * MSS
 
-# =======================
+
 # SOCKET
-# =======================
+
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(LOCAL_ADDR)
 
 print("[SERVER] Aguardando handshake...")
 
-# =======================
+
 # HANDSHAKE (3-way)
-# =======================
+
 
 # PASSO 1: recebe SYN
 data, addr = sock.recvfrom(BUFFER_SIZE)
@@ -60,9 +60,9 @@ if not (flags & FLAG_ACK) or ack_num != snd_nxt:
 print("[SERVER] Handshake concluído")
 
 
-# =======================
+
 # ESTADO DO RECEPTOR
-# =======================
+
 expected_seq = rcv_nxt              # próximo byte esperado
 buffer = {}                         # segmentos fora de ordem: seq -> payload
 buffered_bytes = 0                 # bytes ocupando buffer fora de ordem
@@ -93,7 +93,7 @@ if client_pub is None:
     print("[SERVER] client_pub não recebido — abortando")
     raise SystemExit("[SERVER] client_pub não recebido — encerrando servidor")
 
-# gerar par ephemeral do servidor
+# gerar par 
 server_priv, server_pub = gen_x25519_keypair()
 
 pkt = make_packet(
@@ -115,9 +115,9 @@ session_key = derive_symmetric_key(server_priv, client_pub)
 
 print("[SERVER] Pronto para receber dados...")
 
-# =======================
+
 # LOOP PRINCIPAL
-# =======================
+
 while True:
 
     raw_data, addr = sock.recvfrom(BUFFER_SIZE)
@@ -129,18 +129,18 @@ while True:
 
     print("")
 
-    # tentar parse + decriptar; se falhar na decriptação, ignorar
+   
     try:
         seq, ack, flags, rwnd_recv, payload = parse_packet(raw_data, key=session_key)
     except ValueError:
-        # provavelmente uma retransmissão do client_pub ou pacote inválido em texto puro
+
         print("[SERVER] Falha de decriptação (pacote possivelmente antigo) — descartando")
         continue
 
 
-    # =======================
+
     # FINALIZAÇÃO (FIN)
-    # =======================
+
     if flags & FLAG_FIN:
         fin_seq = seq
         print(f"[SERVER] Recebeu FIN (seq={fin_seq})")
@@ -168,9 +168,9 @@ while True:
     if payload_len == 0:
         continue
 
-    # =======================
+   
     # TRIMMING DE SOBREPOSIÇÃO
-    # =======================
+
     if seq < expected_seq:
         end_seq = seq + payload_len
         if end_seq <= expected_seq:
@@ -183,9 +183,9 @@ while True:
             payload_len = len(payload)
             seq = expected_seq
 
-    # =======================
+
     # ENTREGA / BUFFERIZAÇÃO
-    # =======================
+
     if seq == expected_seq:
         # entrega direta
         expected_seq += payload_len
@@ -205,14 +205,14 @@ while True:
             else:
                 print(f"[SERVER] Buffer cheio — descartando seq={seq}")
 
-    # =======================
+
     # CÁLCULO DA JANELA DO RECEPTOR
-    # =======================
+
     rwnd = max(0, max_buffer_bytes - buffered_bytes)
 
-    # =======================
+
     # ACK CUMULATIVO
-    # =======================
+
     ack_pkt = make_packet(
         seq=snd_nxt,
         ack=expected_seq,
@@ -240,9 +240,8 @@ for attempt in range(retries):
             print("[SERVER] Encerramento: ACK final inválido (ou pacote diferente).")
     except socket.timeout:
         print(f"[SERVER] Timeout aguardando ACK final (tentativa {attempt+1}/{retries}).")
-        # após timeout, o servidor pode optar por retransmitir o FIN ou apenas continuar esperando.
-        # para simplicidade: reenvia o FIN para dar chance ao cliente (pode ajudar se o ACK do cliente foi perdido)
-        fin_pkt = make_packet(
+        
+         fin_pkt = make_packet(
             seq=snd_nxt,
             ack=0,
             flags=FLAG_FIN
@@ -253,5 +252,5 @@ for attempt in range(retries):
 if not final_ack_received:
     print("[SERVER] Não recebi ACK final após retries. Encerrando mesmo assim.")
 
-# opcional: restaurar blocking mode sem timeout (se o servidor seguir vivo)
+
 sock.settimeout(None)

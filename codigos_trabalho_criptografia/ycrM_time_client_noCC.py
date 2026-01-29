@@ -19,17 +19,19 @@ ALPHA = 1/8
 BETA = 1/4
 
 
+timeouts_count= 0
+
 
 bytes_acked = 0
 samples = []
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.settimeout(0.1)
+sock.settimeout(0.05)
 
-send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido) -- "Karn"
+send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido) 
 send_times_timeout = {}
 
-# ===================== HANDSHAKE =====================
+# HANDSHAKE
 
 client_isn = random.randint(1000, 5000)
 pkt = make_packet(seq=client_isn, ack=0, flags=FLAG_SYN)
@@ -92,9 +94,9 @@ if not got_server_pub:
 session_key = derive_symmetric_key(client_priv, server_pub)
 
 
-# ===================== DADOS =====================
+#  DADOS 
 
-total_packets = 10000
+total_packets = 20000
 data = b"A" * (MSS * total_packets)
 data_len = len(data)
 
@@ -108,13 +110,9 @@ send_times = {}
 PERSIST_INTERVAL = 0.5
 last_persist_probe = 0
 
-offset = 0
-start = time.time()
 
-SAMPLE_INTERVAL = total_packets / 100000
-next_sample_time = start
 
-# ===================== FUNÇÕES =====================
+# FUNÇÕES
 
 def send_seg(seq, payload, retransmission=False):
     # se session_key estiver definido, o make_packet vai cifrar
@@ -128,28 +126,39 @@ def send_seg(seq, payload, retransmission=False):
     else:
         send_times_rtt[seq] = None
 
-    # Timeout anchoring: registra só no primeiro envio (não sobrescrever indiscriminadamente)
-    # Se já existe timestamp para esse seq (primeiro envio), mantenha-o.
+
 
     send_times_timeout[seq] = now
 
     unacked[seq] = payload
-# ===================== ENVIO =====================
+# = ENVIO 
 
 print("[CLIENT] Iniciando envio de dados...")
+
+
+offset = 0
+start = time.time()
+
+SAMPLE_INTERVAL = total_packets / 500000
+next_sample_time = start
+real_last_sample_time = start
 
 end_seq = snd_nxt + data_len
 
 while base < end_seq:
-    effective_win = rwnd  # <<< SEM CONTROLE DE CONGESTIONAMENTO
+    effective_win = rwnd  
 
     now = time.time()
-    if now >= next_sample_time:
-        vazao = (bytes_acked * 8) / SAMPLE_INTERVAL / 1e6
+    while now >= next_sample_time:
+        sample_time_dif = now - real_last_sample_time
+        if( sample_time_dif < 1e-9):
+            sample_time_dif = 1e-9
+
+        vazao = (bytes_acked * 8) / (sample_time_dif) / 1e6
         samples.append((next_sample_time - start, vazao))
         bytes_acked = 0
         next_sample_time += SAMPLE_INTERVAL
-
+        real_last_sample_time = now
     # persist probe
     if effective_win == 0:
         if time.time() - last_persist_probe > PERSIST_INTERVAL:
@@ -220,7 +229,7 @@ while base < end_seq:
 
         # RTO lógico expirou: retransmitir apenas o base (TCP-like)
         print(f"[CLIENT] TIMEOUT (RTO expirado), retransmitindo base={base}")
-
+        timeouts_count +=1
         # Karn: marcar que base é retransmissão (invalida RTT para ele)
         send_times_rtt[base] = None
 
@@ -236,6 +245,11 @@ while base < end_seq:
 
 end = time.time()
 print(f"[CLIENT] Envio concluído em {end - start:.2f}s")
+
+print(f"[CLIENT] Vazão média do todo { len(data)*8/(end - start)/1e6 } Mbps")
+
+print(f"[CLIENT] Número de timeouts: { timeouts_count }, número de fast recoveries: 0")
+
 
 fin_pkt = make_packet(seq=next_seq, ack=0, flags=FLAG_FIN)
 
