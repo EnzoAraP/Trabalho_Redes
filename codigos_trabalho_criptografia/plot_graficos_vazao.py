@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-LOSS_RATE_VEC=["0.0","0.1","0.8"]
+LOSS_RATE_VEC=["0.0","0.8"]
 
 CC_TYPE=["","_noCC"] # [ com controle de congestionamento, sem controle de congestionamento ]
 

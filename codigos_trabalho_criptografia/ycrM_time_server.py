@@ -241,7 +241,7 @@ for attempt in range(retries):
     except socket.timeout:
         print(f"[SERVER] Timeout aguardando ACK final (tentativa {attempt+1}/{retries}).")
         
-         fin_pkt = make_packet(
+        fin_pkt = make_packet(
             seq=snd_nxt,
             ack=0,
             flags=FLAG_FIN

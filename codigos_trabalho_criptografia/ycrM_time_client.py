@@ -37,7 +37,7 @@ samples = []  # lista de (tempo, vazao)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(0.1)
 
-send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido)
+send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido) -- "Karn"
 send_times_timeout = {}
 
 
@@ -141,7 +141,7 @@ def send_seg(seq, payload, retransmission=False):
     else:
         send_times_rtt[seq] = None
 
-  
+    # Sempre atualizar o timestamp do "último envio" (ancora do timer)
     send_times_timeout[seq] = now
 
     unacked[seq] = payload
@@ -162,7 +162,7 @@ while base < end_seq:
     now = time.time()
 
     #while para não gerar buracos, só se o loop demorar muito e suprimir 2 passos no tempo, o que não deve ocorrer
-    if now >= next_sample_time:
+    while now >= next_sample_time:
         sample_time_dif = now - real_last_sample_time
         if( sample_time_dif < 1e-9):
             sample_time_dif = 1e-9
@@ -172,8 +172,6 @@ while base < end_seq:
         bytes_acked = 0
         next_sample_time += SAMPLE_INTERVAL
         real_last_sample_time = now
-
-
 
     # para evitar deadlocks:
     if effective_win == 0:
@@ -210,12 +208,12 @@ while base < end_seq:
                     dup_ack_count=0
                     in_fast_recovery=True
                     fast_recovery_cont+=1
-       
+                    #print(f"Fast recovery: {base}")
                     ssthresh = max(cwnd // 2, MSS)
-
+                    # fast recovery cwnd
                     cwnd = ssthresh + 3 * MSS
 
- 
+                    #print(f"[CLIENT] Fast recovery, retransmitindo {base}")    
                     if base in unacked:
                         send_seg(base, unacked[base], retransmission=True)
                     else:
@@ -227,12 +225,12 @@ while base < end_seq:
                     cwnd+=MSS
 
             if ack_num > base:
-
+                #print(dup_ack_count)
                 dup_ack_count = 0
                 acked_seq = base
 
-                # RTT adaptativo 
-    
+                # ===== RTT adaptativo =====
+
                 if acked_seq in send_times_rtt and send_times_rtt[acked_seq] is not None:
                     sampleRTT = time.time() - send_times_rtt[acked_seq]
 
@@ -258,11 +256,11 @@ while base < end_seq:
                     send_times_timeout.pop(s, None)
 
                 base = ack_num
-
+                
                 if in_fast_recovery:
                     in_fast_recovery = False
                     cwnd = ssthresh
-            
+                    # entra diretamente em Congestion Avoidance
 
                 elif cwnd < ssthresh:
                     # Slow Start
@@ -282,15 +280,15 @@ while base < end_seq:
             continue
 
         now = time.time()
-        # se ainda não passou o RTO lógico, volta ao loop 
+        # se ainda não passou o RTO lógico, volta ao loop (recv timeout foi só um tick)
         if now - send_times_timeout[base] <= RTO:
             continue
 
-        # RTO lógico expirou: retransmitir apenas o base
+        # RTO lógico expirou: retransmitir apenas o base (TCP-like)
         print(f"[CLIENT] TIMEOUT (RTO expirado), retransmitindo base={base}")
         timeouts_count +=1
 
-        # Karn: marcar que base é retransmissão
+        # Karn: marcar que base é retransmissão (invalida RTT para ele)
         send_times_rtt[base] = None
 
         # retransmitir somente o base
@@ -299,19 +297,19 @@ while base < end_seq:
             # reinicia o timer lógico para o base a partir da retransmissão
             send_times_timeout[base] = time.time()
 
-        # Backoff exponencial do RTO
+        # Backoff exponencial do RTO (após retransmitir)
         RTO = min(RTO_MAX, RTO * 2)
 
         ssthresh = max(cwnd // 2, MSS)
         cwnd = MSS      
     
-##  ENCERRAMENTO 
+## ===================== ENCERRAMENTO =====================   
 
 end = time.time()
 print(f"[CLIENT] Envio concluído em {end - start:.2f}s")
 
 
-print(f"[CLIENT] Vazão média do todo { len(data)*8/(end - start)/1e6 } Mbps")
+print(f"[CLIENT] Vazão média do todo{ len(data)/(end - start) }")
 
 print(f"[CLIENT] Número de timeouts: { timeouts_count }, número de fast recoveries:{fast_recovery_cont}")
 fin_pkt = make_packet(seq=next_seq, ack=0, flags=FLAG_FIN)
@@ -335,20 +333,20 @@ for attempt in range(fin_retries):
                 base = acknum
                 print("[CLIENT] ACK do FIN recebido")
                 fin_ack_received = True
-
+                # continue loop to check if FIN from server also arrives
 
             if flags & FLAG_FIN:
                 server_fin_seq = seqr
                 print("[CLIENT] FIN do servidor recebido")
-                break  
+                break  # saímos do inner loop: recebemos FIN do servidor
 
-
+        # se chegamos aqui, recebemos o FIN do servidor
         break
 
     except socket.timeout:
         print(f"[CLIENT] Timeout aguardando resposta do servidor ao FIN (tentativa {attempt+1}/{fin_retries}). Retentando FIN...")
 
-
+# após retries, se não recebeu FIN do servidor, prosseguir (evitar bloqueio indefinido)
 if server_fin_seq is None:
     print("[CLIENT] Não recebi FIN do servidor após retries; prosseguindo para encerrar (sem final handshake completo).")
 
@@ -358,7 +356,7 @@ if server_fin_seq is not None:
     sock.sendto(final_ack, SERVER)
     print("[CLIENT] Enviado ACK final. Time-wait (simulado).")
 else:
-
+    # ainda enviar um ACK final "melhor que nada" usando último base conhecido
     final_ack = make_packet(seq=base, ack=0, flags=FLAG_ACK)
     sock.sendto(final_ack, SERVER)
     print("[CLIENT] Enviado ACK final (possível parcial). Time-wait (simulado).")

@@ -28,10 +28,10 @@ samples = []
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(0.05)
 
-send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido) 
+send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido) -- "Karn"
 send_times_timeout = {}
 
-# HANDSHAKE
+# ===================== HANDSHAKE =====================
 
 client_isn = random.randint(1000, 5000)
 pkt = make_packet(seq=client_isn, ack=0, flags=FLAG_SYN)
@@ -94,7 +94,7 @@ if not got_server_pub:
 session_key = derive_symmetric_key(client_priv, server_pub)
 
 
-#  DADOS 
+# ===================== DADOS =====================
 
 total_packets = 20000
 data = b"A" * (MSS * total_packets)
@@ -112,7 +112,7 @@ last_persist_probe = 0
 
 
 
-# FUNÇÕES
+# ===================== FUNÇÕES =====================
 
 def send_seg(seq, payload, retransmission=False):
     # se session_key estiver definido, o make_packet vai cifrar
@@ -126,12 +126,13 @@ def send_seg(seq, payload, retransmission=False):
     else:
         send_times_rtt[seq] = None
 
-
+    # Timeout anchoring: registra só no primeiro envio (não sobrescrever indiscriminadamente)
+    # Se já existe timestamp para esse seq (primeiro envio), mantenha-o.
 
     send_times_timeout[seq] = now
 
     unacked[seq] = payload
-# = ENVIO 
+# ===================== ENVIO =====================
 
 print("[CLIENT] Iniciando envio de dados...")
 
@@ -139,14 +140,14 @@ print("[CLIENT] Iniciando envio de dados...")
 offset = 0
 start = time.time()
 
-SAMPLE_INTERVAL = total_packets / 500000
+SAMPLE_INTERVAL = total_packets / 100000
 next_sample_time = start
 real_last_sample_time = start
 
 end_seq = snd_nxt + data_len
 
 while base < end_seq:
-    effective_win = rwnd  
+    effective_win = rwnd  # <<< SEM CONTROLE DE CONGESTIONAMENTO
 
     now = time.time()
     while now >= next_sample_time:
@@ -246,7 +247,7 @@ while base < end_seq:
 end = time.time()
 print(f"[CLIENT] Envio concluído em {end - start:.2f}s")
 
-print(f"[CLIENT] Vazão média do todo { len(data)*8/(end - start)/1e6 } Mbps")
+print(f"[CLIENT] Vazão média do todo{ len(data)/(end - start) }s")
 
 print(f"[CLIENT] Número de timeouts: { timeouts_count }, número de fast recoveries: 0")
 
