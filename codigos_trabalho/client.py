@@ -2,7 +2,7 @@
 import socket
 import random
 import time
-from ycrM_time_protocol import *
+from protocol import *
 
 
 session_key = None

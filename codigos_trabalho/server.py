@@ -1,8 +1,10 @@
 # server.py
 import socket
 import random
-from time_protocol import *
+from protocol import *
+import time
 
+session_key = None
 
 # CONFIGURAÇÕES
 
@@ -58,11 +60,58 @@ if not (flags & FLAG_ACK) or ack_num != snd_nxt:
 print("[SERVER] Handshake concluído")
 
 
+
 # ESTADO DO RECEPTOR
 
 expected_seq = rcv_nxt              # próximo byte esperado
 buffer = {}                         # segmentos fora de ordem: seq -> payload
 buffered_bytes = 0                 # bytes ocupando buffer fora de ordem
+
+# CRIPTOGRAFIA
+
+KEYEX_TOTAL_TIMEOUT = 5.0
+KEYEX_POLL = 0.5
+
+sock.settimeout(KEYEX_POLL)
+start = time.time()
+client_pub = None
+
+while time.time() - start < KEYEX_TOTAL_TIMEOUT:
+    try:
+        data, addr = sock.recvfrom(BUFFER_SIZE)
+        seq, _, flags, _, payload = parse_packet(data)
+        if flags & FLAG_DATA:
+            client_pub = payload
+            expected_seq = seq + len(payload)
+            break
+    except socket.timeout:
+        continue
+
+sock.settimeout(None)
+
+if client_pub is None:
+    print("[SERVER] client_pub não recebido — abortando")
+    raise SystemExit("[SERVER] client_pub não recebido — encerrando servidor")
+
+# gerar par 
+server_priv, server_pub = gen_x25519_keypair()
+
+pkt = make_packet(
+    seq=snd_nxt,
+    ack=expected_seq,
+    flags=FLAG_DATA,
+    payload=server_pub
+)
+sock.sendto(pkt, addr)
+
+
+snd_nxt += len(server_pub)
+
+# derivar chave simétrica do lado do servidor
+session_key = derive_symmetric_key(server_priv, client_pub)
+
+
+
 
 print("[SERVER] Pronto para receber dados...")
 
@@ -70,16 +119,24 @@ print("[SERVER] Pronto para receber dados...")
 # LOOP PRINCIPAL
 
 while True:
-    data, addr = sock.recvfrom(BUFFER_SIZE)
+
+    raw_data, addr = sock.recvfrom(BUFFER_SIZE)
 
     # perda artificial
     if random.random() < LOSS_RATE:
         print("[SERVER] Pacote descartado artificialmente")
         continue
-    
+
     print("")
 
-    seq, ack, flags, rwnd_recv, payload = parse_packet(data)
+   
+    try:
+        seq, ack, flags, rwnd_recv, payload = parse_packet(raw_data, key=session_key)
+    except ValueError:
+
+        print("[SERVER] Falha de decriptação (pacote possivelmente antigo) — descartando")
+        continue
+
 
 
     # FINALIZAÇÃO (FIN)
@@ -111,7 +168,7 @@ while True:
     if payload_len == 0:
         continue
 
-
+   
     # TRIMMING DE SOBREPOSIÇÃO
 
     if seq < expected_seq:
@@ -183,8 +240,7 @@ for attempt in range(retries):
             print("[SERVER] Encerramento: ACK final inválido (ou pacote diferente).")
     except socket.timeout:
         print(f"[SERVER] Timeout aguardando ACK final (tentativa {attempt+1}/{retries}).")
-        # após timeout, o servidor pode optar por retransmitir o FIN ou apenas continuar esperando.
-        # para simplicidade: reenvia o FIN para dar chance ao cliente (pode ajudar se o ACK do cliente foi perdido)
+        
         fin_pkt = make_packet(
             seq=snd_nxt,
             ack=0,
@@ -196,5 +252,5 @@ for attempt in range(retries):
 if not final_ack_received:
     print("[SERVER] Não recebi ACK final após retries. Encerrando mesmo assim.")
 
-# opcional: restaurar blocking mode sem timeout (se o servidor seguir vivo)
+
 sock.settimeout(None)
