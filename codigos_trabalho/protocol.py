@@ -72,4 +72,4 @@ def parse_packet(data, key=None):
 
 
 
-LOSS_RATE = 0.000
+LOSS_RATE = 0.008

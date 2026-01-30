@@ -37,7 +37,7 @@ samples = []  # lista de (tempo, vazao)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(0.1)
 
-send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido) -- "Karn"
+send_times_rtt = {}       # para estimativa de RTT (põe None se retransmitido) 
 send_times_timeout = {}
 
 
@@ -131,17 +131,17 @@ last_persist_probe = 0
 
 
 def send_seg(seq, payload, retransmission=False):
-    # se session_key estiver definido, o make_packet vai cifrar
+    # se session_key estiver definido, o make_packet vai fazer a cifra
     pkt = make_packet(seq=seq, ack=0, flags=FLAG_DATA, rwnd=0, payload=payload, key=session_key)
     sock.sendto(pkt, SERVER)
     now = time.time()
-    # Karn: só registrar RTT se NÃO for retransmissão
+    # Só registrar RTT se NÃO for retransmissão
     if not retransmission:
         send_times_rtt[seq] = now
     else:
         send_times_rtt[seq] = None
 
-    # Sempre atualizar o timestamp do "último envio" (ancora do timer)
+    # Sempre atualizar o timestamp do "último envio" (âncora do timer)
     send_times_timeout[seq] = now
 
     unacked[seq] = payload
@@ -280,15 +280,15 @@ while base < end_seq:
             continue
 
         now = time.time()
-        # se ainda não passou o RTO lógico, volta ao loop (recv timeout foi só um tick)
+        # se ainda não passou o RTO lógico, volta ao loop
         if now - send_times_timeout[base] <= RTO:
             continue
 
-        # RTO lógico expirou: retransmitir apenas o base (TCP-like)
-        print(f"[CLIENT] TIMEOUT (RTO expirado), retransmitindo base={base}")
+        # RTO lógico expirou: retransmitir apenas o base
+        #print(f"[CLIENT] TIMEOUT (RTO expirado), retransmitindo base={base}")
         timeouts_count +=1
 
-        # Karn: marcar que base é retransmissão (invalida RTT para ele)
+        # Karn: marcar que base é retransmissão 
         send_times_rtt[base] = None
 
         # retransmitir somente o base
@@ -303,13 +303,13 @@ while base < end_seq:
         ssthresh = max(cwnd // 2, MSS)
         cwnd = MSS      
     
-## ===================== ENCERRAMENTO =====================   
-
+###
+# ===================== ENCERRAMENTO =====================   
 end = time.time()
 print(f"[CLIENT] Envio concluído em {end - start:.2f}s")
 
 
-print(f"[CLIENT] Vazão média do todo{ len(data)/(end - start) }")
+print(f"[CLIENT] Vazão média do todo: { len(data) * 8/(end - start)/ 1e6 } s")
 
 print(f"[CLIENT] Número de timeouts: { timeouts_count }, número de fast recoveries:{fast_recovery_cont}")
 fin_pkt = make_packet(seq=next_seq, ack=0, flags=FLAG_FIN)
@@ -333,12 +333,12 @@ for attempt in range(fin_retries):
                 base = acknum
                 print("[CLIENT] ACK do FIN recebido")
                 fin_ack_received = True
-                # continue loop to check if FIN from server also arrives
+                # 
 
             if flags & FLAG_FIN:
                 server_fin_seq = seqr
                 print("[CLIENT] FIN do servidor recebido")
-                break  # saímos do inner loop: recebemos FIN do servidor
+                break  # saímos do loop interno: recebemos FIN do servidor
 
         # se chegamos aqui, recebemos o FIN do servidor
         break
@@ -356,7 +356,7 @@ if server_fin_seq is not None:
     sock.sendto(final_ack, SERVER)
     print("[CLIENT] Enviado ACK final. Time-wait (simulado).")
 else:
-    # ainda enviar um ACK final "melhor que nada" usando último base conhecido
+    # ainda enviar um ACK final 
     final_ack = make_packet(seq=base, ack=0, flags=FLAG_ACK)
     sock.sendto(final_ack, SERVER)
     print("[CLIENT] Enviado ACK final (possível parcial). Time-wait (simulado).")

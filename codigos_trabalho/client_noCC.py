@@ -247,7 +247,7 @@ while base < end_seq:
 end = time.time()
 print(f"[CLIENT] Envio concluído em {end - start:.2f}s")
 
-print(f"[CLIENT] Vazão média do todo{ len(data)/(end - start) }s")
+print(f"[CLIENT] Vazão média do todo: { len(data) * 8/(end - start)/ 1e6  } s")
 
 print(f"[CLIENT] Número de timeouts: { timeouts_count }, número de fast recoveries: 0")
 
